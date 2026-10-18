@@ -20,7 +20,7 @@ jobs:
       - name: Install Qt and zlib
         run: |
           python -m pip install aqtinstall==3.3.0
-          python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 -O C:/Qt
+          python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 -O C:/Qt --archives qtbase qttools
           if ($LASTEXITCODE) { throw 'Qt installation failed' }
           if (!$env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT='C:/vcpkg' }
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows
@@ -50,8 +50,16 @@ jobs:
           Copy-Item README.md,THIRD_PARTY.md,LICENSE,start.bat $root
           Get-ChildItem C:/llama-build/bin/Release | Where-Object { $_.Extension -eq '.dll' -or $_.Name -eq 'llama-server.exe' } | Copy-Item -Destination "$root/engine/cpu"
           Copy-Item C:/llama.cpp/LICENSE "$root/licenses/llama.cpp-LICENSE"
-          Copy-Item "$env:VCPKG_ROOT/installed/x64-windows/bin/zlib1.dll" "$root/bin"
-          & "$env:QT_ROOT/bin/windeployqt.exe" --release --no-translations --compiler-runtime --dir "$root/bin" "$root/bin/fable-localization-studio.exe"
+          Get-ChildItem "$env:VCPKG_ROOT/installed/x64-windows/bin/*.dll" | Copy-Item -Destination "$root/bin"
+          Copy-Item "$env:VCPKG_ROOT/installed/x64-windows/share/zlib/copyright" "$root/licenses/zlib-LICENSE.txt"
+          $vswhere="${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs=& $vswhere -latest -property installationPath
+          $crt=Get-Item "$vs/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$crt) { throw 'Redistributable Microsoft runtime not found' }
+          Get-ChildItem "$($crt.FullName)/*.dll" | Copy-Item -Destination "$root/bin" -Force
+          Get-ChildItem "$($crt.FullName)/*.dll" | Copy-Item -Destination "$root/engine/cpu" -Force
+          if (!(Test-Path "$root/bin/msvcp140.dll") -or !(Test-Path "$root/bin/vcruntime140.dll")) { throw 'Required CRT files missing' }
+          & "$env:QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir "$root/bin" "$root/bin/fable-localization-studio.exe"
           if ($LASTEXITCODE) { throw 'Qt deployment failed' }
           Copy-Item "$env:QT_ROOT/plugins/platforms/qoffscreen.dll" "$root/bin/platforms" -Force
           Copy-Item "$env:QT_ROOT/plugins/sqldrivers/qsqlite.dll" "$root/bin/sqldrivers" -Force
