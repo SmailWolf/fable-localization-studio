@@ -1,0 +1,115 @@
+name: Linux release
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/linux-release.yml]
+permissions:
+  contents: write
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config qt6-base-dev libqt6sql6-sqlite zlib1g-dev fonts-noto-core
+      - name: Build utility
+        run: ./build.sh
+      - name: Build local translation engine
+        run: |
+          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git /tmp/llama.cpp
+          git -C /tmp/llama.cpp checkout bd4eeaa047006cb1fe71999fbd11134b5836e167
+          cmake -S /tmp/llama.cpp -B /tmp/llama-build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_OPENSSL=OFF
+          cmake --build /tmp/llama-build --target llama-server -j2
+      - name: Package clean portable directory
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil, subprocess, re, os
+          root=Path('/tmp/Fable-Localization-Studio-0.3.0-Linux-x86_64')
+          for folder in ['bin','lib','plugins/platforms','plugins/sqldrivers','engine/cpu','models','fonts','licenses']:
+              (root/folder).mkdir(parents=True,exist_ok=True)
+          shutil.copy2('bin/fable-localization-studio',root/'bin')
+          for name in ['README.md','THIRD_PARTY.md','LICENSE']:
+              shutil.copy2(name,root/name)
+          for p in Path('/tmp/llama-build/bin').iterdir():
+              if p.name=='llama-server' or '.so' in p.name:
+                  shutil.copy2(p.resolve(),root/'engine/cpu'/p.name)
+          shutil.copy2('/tmp/llama.cpp/LICENSE',root/'licenses/llama.cpp-LICENSE')
+          font=next(Path('/usr/share/fonts/truetype/noto').glob('NotoSans-Regular.ttf'))
+          shutil.copy2(font,root/'fonts/NotoSans-Regular.ttf')
+          plugins=Path(subprocess.check_output(['qtpaths6','--query','QT_INSTALL_PLUGINS'],text=True).strip())
+          for group,names in {'platforms':['libqxcb.so','libqoffscreen.so'],'sqldrivers':['libqsqlite.so']}.items():
+              for name in names: shutil.copy2(plugins/group/name,root/'plugins'/group/name)
+          # Keep glibc and graphics drivers on the host; bundle Qt and their runtime dependencies.
+          exclude={'libc.so.6','libm.so.6','libpthread.so.0','libdl.so.2','librt.so.1','libresolv.so.2','libutil.so.1','ld-linux-x86-64.so.2'}
+          seeds=[root/'bin/fable-localization-studio']+list((root/'plugins').rglob('*.so'))+[root/'engine/cpu/llama-server']
+          origins={}
+          for binary in seeds:
+              output=subprocess.check_output(['ldd',str(binary)],text=True)
+              if 'not found' in output: raise RuntimeError(output)
+              for source in re.findall(r'=> (/\S+)',output):
+                  p=Path(source)
+                  if p.name not in exclude and not str(p).startswith(str(root)):
+                      target=root/'lib'/p.name
+                      if not target.exists(): shutil.copy2(p.resolve(),target)
+                      origins[p.name]=str(p)
+          for path in origins.values():
+              owner=subprocess.run(['dpkg-query','-S',path],capture_output=True,text=True).stdout
+              if not owner:
+                  owner=subprocess.run(['dpkg-query','-S',path.replace('/lib/','/usr/lib/',1)],capture_output=True,text=True).stdout
+              for row in owner.splitlines():
+                  package=row.split(': ',1)[0].split(':',1)[0]
+                  copyright=Path('/usr/share/doc')/package/'copyright'
+                  if copyright.exists(): shutil.copy2(copyright,root/'licenses'/(package+'-copyright'))
+          noto=Path('/usr/share/doc/fonts-noto-core/copyright')
+          if noto.exists(): shutil.copy2(noto,root/'licenses/Noto-copyright')
+          (root/'licenses/RUNTIME-SOURCES.txt').write_text('Runtime libraries are Ubuntu 24.04 system packages. Copyright and license notices are included beside this file. Corresponding package source: https://archive.ubuntu.com/ubuntu/pool/ ; Qt: https://download.qt.io/archive/qt/6.4/ ; llama.cpp source commit bd4eeaa047006cb1fe71999fbd11134b5836e167 at https://github.com/ggml-org/llama.cpp . The MIT license covers the utility only.\n')
+          (root/'bin/qt.conf').write_text('[Paths]\nPrefix=..\nPlugins=plugins\n')
+          launcher='''#!/bin/sh
+          set -eu
+          FABLE_STUDIO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          export LD_LIBRARY_PATH="$FABLE_STUDIO_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export QT_PLUGIN_PATH="$FABLE_STUDIO_ROOT/plugins"
+          export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+          exec "$FABLE_STUDIO_ROOT/bin/fable-localization-studio" "$@"
+          '''
+          (root/'start.sh').write_text(launcher); (root/'start.sh').chmod(0o755)
+          (root/'START_HERE_UK.txt').write_text('Fable Localization Studio 0.3.0 — готова Linux x86_64 збірка.\n\nПотрібні Linux із glibc 2.39+ (наприклад Ubuntu 24.04+) та процесор з AVX2/FMA/F16C. Розпакуйте архів у доступну для запису папку та запустіть ./start.sh. Для Wayland потрібен XWayland.\n\nВключено Qt, SQLite-плагін, Noto Sans та CPU llama-server. NVIDIA CUDA-рушій у цей архів не входить: у програмі вибирайте CPU. Для CUDA можна окремо додати сумісний llama-server у engine/cuda/.\n\nМодель не включено. Отримайте TranslateGemma 4B GGUF окремо й виберіть її в налаштуваннях. Можна покласти її в models/translategemma-4b-Q4_K_M.gguf. Ручний редактор працює без моделі.\n\nВиберіть Fable II або Fable III, власний оригінальний book.babel і мову перекладу. Українська є типовою, білоруська доступна на вибір. Прогрес створюється в state/ після запуску.\n\nГотових перекладів, локалізацій, патчів, файлів гри та чужої бази прогресу в архіві немає. MIT стосується коду утиліти; ліцензії сторонніх компонентів наведено в licenses/.\n')
+          (root/'models/README.txt').write_text('Download a compatible TranslateGemma 4B GGUF separately: https://huggingface.co/google/translategemma-4b-it . Select it in the application. Model license terms apply separately.\n')
+          assert not any(root.rglob('*.sqlite*')) and not any(root.rglob('*.babel')) and not any(root.rglob('*.bft')) and not any(root.rglob('*.gguf'))
+          PY
+      - name: Test unpacked application and engine
+        run: |
+          cd /tmp/Fable-Localization-Studio-0.3.0-Linux-x86_64
+          QT_QPA_PLATFORM=offscreen ./start.sh --self-test
+          QT_QPA_PLATFORM=offscreen ./start.sh --screenshot /tmp/studio-release.png
+          LD_LIBRARY_PATH="$PWD/lib:$PWD/engine/cpu" ./engine/cpu/llama-server --version
+          rm -rf state
+      - name: Archive and publish v0.3.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p /tmp/release-assets
+          tar -C /tmp -czf /tmp/release-assets/Fable-Localization-Studio-0.3.0-Linux-x86_64.tar.gz Fable-Localization-Studio-0.3.0-Linux-x86_64
+          cd /tmp/release-assets
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          python3 - <<'PY'
+          import json,urllib.request,os
+          from pathlib import Path
+          repo=os.environ['GH_REPOSITORY'];token=os.environ['GH_TOKEN']
+          def request(url,data=None,kind='application/json'):
+              headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':kind,'X-GitHub-Api-Version':'2022-11-28'}
+              req=urllib.request.Request(url,data=data,headers=headers)
+              with urllib.request.urlopen(req) as response:return json.load(response)
+          notes='Готова Linux x86_64 збірка: розпакуйте архів і запустіть `start.sh`.\n\nПотрібні glibc 2.39+ (Ubuntu 24.04+ або сумісна система), AVX2/FMA/F16C і X11/XWayland. Включено Qt, SQLite-плагін, Noto Sans і CPU-рушій llama.cpp. CUDA-рушій та модель TranslateGemma завантажуються окремо. Ручний редактор працює без моделі.\n\nВерсія 0.3: Fable II/III, ручна редактура, сортування всіх записів, фільтр помилок, підтримка української й білоруської, доповнення BFT.\n\n**Без готових локалізацій, перекладів, патчів, файлів гри та бази прогресу.** Код утиліти — MIT; ліцензії включених компонентів лежать у `licenses/`.\n\nПеревірено запуск інтерфейсу без даних гри, базові тести та запуск CPU-рушія. Після завантаження порівняйте SHA256 з `SHA256SUMS.txt`.'
+          release=request('https://api.github.com/repos/'+repo+'/releases',json.dumps({'tag_name':'v0.3.0','target_commitish':os.environ['GH_COMMIT'],'name':'Fable Localization Studio 0.3.0 — Linux x86_64','body':notes,'draft':False,'prerelease':False}).encode())
+          for p in sorted(Path('.').iterdir()):
+              request('https://uploads.github.com/repos/'+repo+'/releases/'+str(release['id'])+'/assets?name='+p.name,p.read_bytes(),'application/octet-stream')
+          print(release['html_url'])
+          PY
