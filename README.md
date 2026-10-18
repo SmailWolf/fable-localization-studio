@@ -2,7 +2,11 @@
 
 **Version 0.3.1 · C++20 / Qt 6 · Linux / Windows · MIT**
 
-Linux-збірка доступна в [Releases](https://github.com/SmailWolf/fable-localization-studio/releases/tag/v0.3.0). Для Windows додано окрему збірку MSVC та автоматичне пакування; стан перевірки дивіться у Windows release workflow.
+Готові збірки: [Linux x86_64](https://github.com/SmailWolf/fable-localization-studio/releases/tag/v0.3.0) · [Windows x86_64](https://github.com/SmailWolf/fable-localization-studio/releases/tag/v0.3.1).
+Windows-пакет перевірено на Windows runner: запуск інтерфейсу й CPU-рушія,
+українські шляхи, SQLite та ручне збереження. Linux-пакет також перевірено
+з локальною TranslateGemma. Роботу експортованого патча всередині гри на Windows
+ще потрібно перевіряти.
 
 Локальна утиліта для створення й редагування перекладів **Fable II** та **Fable III**.
 Основна мова інтерфейсу й типовий переклад — українська. Білоруська та інші мови
@@ -55,7 +59,7 @@ cmake --build build -j
 
 ## Windows
 
-Готовий Windows ZIP з'являється в Releases після успішної збірки та перевірок.
+У Windows-релізі вибирайте файл із суфіксом `-portable.zip`: він містить потрібні Qt та Microsoft Visual C++ DLL і не потребує окремого встановлення VC++ Redistributable.
 Розпакуйте весь архів і запустіть `start.bat`. Підтримка пакета: Windows 10/11
 x64, процесор AVX2/FMA/F16C. Модель завантажується окремо. Архів містить CPU-рушій;
 для CUDA потрібен окремий Windows `llama-server.exe` у `engine/cuda/`.
