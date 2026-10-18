@@ -1,0 +1,102 @@
+name: Windows portable package
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/windows-portable.yml]
+permissions:
+  contents: write
+jobs:
+  portable:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Download completed Windows build
+        run: |
+          $url='https://github.com/SmailWolf/fable-localization-studio/releases/download/v0.3.1/Fable-Localization-Studio-0.3.1-Windows-x86_64.zip'
+          $ready=$false
+          for ($i=0; $i -lt 90; $i++) {
+            try { Invoke-WebRequest $url -OutFile C:/windows-build.zip; $ready=$true; break } catch { Start-Sleep -Seconds 10 }
+          }
+          if (!$ready) { throw 'Windows build asset did not become available' }
+          Expand-Archive C:/windows-build.zip -DestinationPath C:/portable
+      - name: Add app-local Microsoft runtime
+        run: |
+          $root='C:/portable/Fable-Localization-Studio-0.3.1-Windows-x86_64'
+          $vswhere="${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs=& $vswhere -latest -property installationPath
+          $crt=Get-ChildItem "$vs/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT" -Directory | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$crt) { throw 'Redistributable Microsoft runtime not found' }
+          Get-ChildItem "$($crt.FullName)/*.dll" | Copy-Item -Destination "$root/bin" -Force
+          Get-ChildItem "$($crt.FullName)/*.dll" | Copy-Item -Destination "$root/engine/cpu" -Force
+          if (!(Test-Path "$root/bin/msvcp140.dll") -or !(Test-Path "$root/bin/vcruntime140.dll")) { throw 'Required CRT files missing' }
+          curl.exe -fL --retry 2 https://raw.githubusercontent.com/madler/zlib/v1.3.1/LICENSE -o "$root/licenses/zlib-LICENSE.txt"
+          if ($LASTEXITCODE) { throw 'zlib license download failed' }
+          curl.exe -fL --retry 2 https://raw.githubusercontent.com/qt/qtbase/v6.8.3/LICENSES/GPL-3.0-only.txt -o "$root/licenses/Qt-GPL-3.0.txt"
+          if ($LASTEXITCODE) { throw 'Qt license download failed' }
+          $text=Get-Content "$root/START_HERE_UK.txt" -Raw
+          $text+="`nPortable-варіант також містить app-local бібліотеки Microsoft Visual C++. Встановлювати окремий VC++ Redistributable не потрібно.`n"
+          $text | Set-Content -Encoding utf8 "$root/START_HERE_UK.txt"
+      - name: Test Unicode paths and manual SQLite save
+        run: |
+          $root='C:/portable/Fable-Localization-Studio-0.3.1-Windows-x86_64'
+          $env:QT_QPA_PLATFORM='offscreen'
+          $env:PATH="$root/bin;$env:PATH"
+          @'
+          from pathlib import Path
+          import struct,zlib,json
+          root=Path('C:/Перевірка Fable');root.mkdir(exist_ok=True)
+          text='Test <a_img> %1';payload=(text+'\0').encode('utf-16-be');raw=struct.pack('>I',len(payload)//2)+payload
+          z=zlib.compressobj();compressed=z.compress(raw)+z.flush(zlib.Z_SYNC_FLUSH)
+          book=bytes.fromhex('5b010000')+struct.pack('>IIIIIIII',1,1,1,0,1,1,len(compressed),len(raw))+compressed
+          (root/'book.babel').write_bytes(book)
+          (root/'manual.json').write_text(json.dumps({'00000001':{'source':text,'target':'Перевірка <a_img> %1'}},ensure_ascii=False),encoding='utf-8')
+          '@ | python -
+          $args='--init --game fable2 --book "C:/Перевірка Fable/book.babel" --seed "C:/Перевірка Fable/manual.json" --project "'+$root+'/state/verify.sqlite"'
+          $p=Start-Process "$root/bin/fable-localization-studio.exe" -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "SQLite save failed: $($p.ExitCode)" }
+          @'
+          import sqlite3
+          p='C:/portable/Fable-Localization-Studio-0.3.1-Windows-x86_64/state/verify.sqlite'
+          with sqlite3.connect(p) as db:
+              row=db.execute('select target,status from records where id=1').fetchone()
+              assert row==('Перевірка <a_img> %1','manual'),row
+          print('PASS Windows Unicode paths, SQLite plugin, manual translation import and persistence')
+          '@ | python -
+          if ($LASTEXITCODE) { throw 'SQLite persistence verification failed' }
+          $p=Start-Process "$root/bin/fable-localization-studio.exe" -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Regression checks failed' }
+          $p=Start-Process "$root/bin/fable-localization-studio.exe" -ArgumentList '--screenshot','C:/windows-portable-preview.png' -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or !(Test-Path C:/windows-portable-preview.png)) { throw 'Portable GUI test failed' }
+          & "$root/engine/cpu/llama-server.exe" --version
+          if ($LASTEXITCODE) { throw 'Portable CPU runtime test failed' }
+          Remove-Item "$root/state" -Recurse -Force
+      - name: Publish portable Windows archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          New-Item -ItemType Directory -Force C:/portable-assets | Out-Null
+          Compress-Archive -Path C:/portable/Fable-Localization-Studio-0.3.1-Windows-x86_64 -DestinationPath C:/portable-assets/Fable-Localization-Studio-0.3.1-Windows-x86_64-portable.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash C:/portable-assets/*.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  Fable-Localization-Studio-0.3.1-Windows-x86_64-portable.zip" | Set-Content -Encoding ascii C:/portable-assets/SHA256SUMS-Windows-portable.txt
+          Set-Location C:/portable-assets
+          @'
+          import json,urllib.request,os
+          from pathlib import Path
+          repo=os.environ['GH_REPOSITORY'];token=os.environ['GH_TOKEN']
+          def request(url,data=None,kind='application/json',method=None):
+              req=urllib.request.Request(url,data=data,method=method,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':kind,'X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(req) as response:return json.load(response)
+          base='https://api.github.com/repos/'+repo
+          release=request(base+'/releases/tags/v0.3.1')
+          for p in sorted(Path('.').iterdir()):
+              request('https://uploads.github.com/repos/'+repo+'/releases/'+str(release['id'])+'/assets?name='+p.name,p.read_bytes(),'application/octet-stream')
+          prefix='**Рекомендований Windows-файл: `Fable-Localization-Studio-0.3.1-Windows-x86_64-portable.zip`.** Він додатково містить Microsoft Visual C++ runtime поруч із програмою й не потребує окремого встановлення VC++ Redistributable. Перевірено українські шляхи, SQLite-плагін, ручне збереження тексту, запуск інтерфейсу та CPU-рушія.\n\n'
+          request(base+'/releases/'+str(release['id']),json.dumps({'body':prefix+release['body']}).encode(),method='PATCH')
+          print(release['html_url'])
+          '@ | python -
+          if ($LASTEXITCODE) { throw 'Portable publication failed' }
