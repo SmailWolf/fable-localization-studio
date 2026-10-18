@@ -1,0 +1,31 @@
+# Local state, proprietary game assets, generated translations and exports
+state/
+data/
+exports/
+localization/
+translations/
+*.sqlite*
+*.db
+*.babel
+*.bft
+*.BFT
+*.gguf
+*.log
+*.zip
+*.tar*
+# Models, external runtime and fonts are supplied separately
+models/
+engine/
+fonts/
+# Build output
+.build/
+build/
+bin/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+# Local configuration
+.env*
+*.user
+.vscode/
