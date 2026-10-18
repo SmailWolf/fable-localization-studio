@@ -172,8 +172,16 @@ QByteArray Font::add(const QString &ttf, const QString &chars,
   if (needed.isEmpty())
     return data;
   require(!ttf.isEmpty(), "Для відсутніх символів потрібен TTF/OTF: " + needed);
+  const QFileInfo fontFile(ttf);
+  require(fontFile.isFile(),
+          "Файл шрифту TTF/OTF не знайдено: " + fontFile.absoluteFilePath() +
+              "\nОберіть наявний файл шрифту кнопкою «Обрати…».");
+  require(fontFile.isReadable(),
+          "Немає доступу до читання шрифту TTF/OTF: " + fontFile.absoluteFilePath());
   QRawFont rf(ttf, double(u32(header, 4, le)), QFont::PreferFullHinting);
-  require(rf.isValid(), "Не вдалося відкрити TTF/OTF");
+  require(rf.isValid(), "Не вдалося прочитати шрифт TTF/OTF: " +
+                            fontFile.absoluteFilePath() +
+                            "\nОберіть коректний файл TTF або OTF.");
   int ai = glyph('A');
   require(ai < count, "Шрифт не містить A для калібрування");
   int ao = ai * stride;
@@ -206,7 +214,9 @@ QByteArray Font::add(const QString &ttf, const QString &chars,
     require(!ch.isSurrogate(), "BFT не підтримує нові символи поза BMP");
     auto gs = rf.glyphIndexesForString(QString(ch));
     require(gs.size() == 1 && gs[0] != 0,
-            "У TTF немає символу: " + QString(ch));
+            "У TTF немає символу: «" + QString(ch) + "» (U+" +
+                QString::number(ch.unicode(), 16).toUpper().rightJustified(4, '0') +
+                ").\nПеревірте цей символ у перекладі або оберіть інший TTF/OTF.");
     auto bbox = rf.boundingRect(gs[0]);
     auto adv = rf.advancesForGlyphIndexes(gs)[0].x();
     int cellH = qRound(
