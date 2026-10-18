@@ -785,8 +785,15 @@ public:
       status->setText("Зупинка поточного запиту…");
     });
     connect(exportButton, &QPushButton::clicked, this, [&] {
+      const auto exportRoot = root + "/exports";
+      if (!QDir().mkpath(exportRoot)) {
+        QMessageBox::critical(this, "Не вдалося створити папку",
+                              "Перевірте доступ до папки: " + exportRoot);
+        return;
+      }
       auto folder = QFileDialog::getExistingDirectory(
-          this, "Окрема папка для готового патча", root + "/exports");
+          this, "Куди зберегти готовий патч (папку data буде створено автоматично)",
+          exportRoot);
       if (folder.isEmpty())
         return;
       try {
@@ -796,8 +803,9 @@ public:
         QMessageBox::information(
             this, "Патч збережено",
             "Збережено: " + folder +
-                "\nПерегляньте manifest.json. Готовий машинний переклад ще "
-                "потребує перевірки у грі.");
+                "\nГотові файли гри збережено в папці data. Збережіть "
+                "резервну копію оригіналів і скопіюйте data в папку гри "
+                "із заміною файлів.\nПереклад і шрифти потребують перевірки у грі.");
       } catch (const std::exception &e) {
         QApplication::restoreOverrideCursor();
         error(e);
