@@ -4,6 +4,13 @@
 #include <thread>
 using namespace fls;
 namespace {
+QString engineFile(const QString &root, bool cuda = false) {
+  QString path = root + "/engine/" + (cuda ? "cuda" : "cpu") + "/llama-server";
+#ifdef Q_OS_WIN
+  path += ".exe";
+#endif
+  return path;
+}
 class Window : public QMainWindow {
   QString root;
   Settings cfg;
@@ -69,8 +76,7 @@ class Window : public QMainWindow {
     s.maxTokens = maximum->value();
     s.limit = limit->value();
     s.layers = backend->currentIndex() == 0 ? 0 : 99;
-    s.engine =
-        root + "/engine/" + (s.layers ? "cuda" : "cpu") + "/llama-server";
+    s.engine = engineFile(root, s.layers != 0);
     s.glossary = glossary->text();
     return s;
   }
@@ -959,7 +965,7 @@ int main(int argc, char **argv) {
     if (args.contains("--smoke")) {
       Settings s;
       s.model = root + "/models/translategemma-4b-Q4_K_M.gguf";
-      s.engine = root + "/engine/cpu/llama-server";
+      s.engine = engineFile(root);
       s.project = root + "/state/smoke.sqlite";
       s.threads = 8;
       s.context = 4096;
@@ -991,8 +997,7 @@ int main(int argc, char **argv) {
       s.limit = value("--limit", "10").toInt();
       s.errorsOnly = args.contains("--retry-errors");
       s.layers = args.contains("--cuda") ? 99 : 0;
-      s.engine =
-          root + "/engine/" + (s.layers ? "cuda" : "cpu") + "/llama-server";
+      s.engine = engineFile(root, s.layers != 0);
       s.glossary = value("--glossary");
       require(!s.source.isEmpty(), "Потрібен --book /path/book.babel");
       if (args.contains("--seed"))

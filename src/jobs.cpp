@@ -191,6 +191,13 @@ struct Model {
                      "--no-webui"};
     if (s.layers == 0)
       args << "--device" << "none";
+#ifdef Q_OS_WIN
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("PATH", QDir::toNativeSeparators(
+                                   QCoreApplication::applicationDirPath()) +
+                                   ";" + environment.value("PATH"));
+    process.setProcessEnvironment(environment);
+#endif
     process.setProcessChannelMode(QProcess::MergedChannels);
     process.setStandardOutputFile(QFileInfo(s.project).absolutePath() +
                                       "/model.log",

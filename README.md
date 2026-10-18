@@ -1,8 +1,8 @@
 # Fable Localization Studio
 
-**Version 0.3 · C++20 / Qt 6 · Linux · MIT**
+**Version 0.3.1 · C++20 / Qt 6 · Linux / Windows · MIT**
 
-Збірка перевірена на Linux. Windows-версія поки не зібрана й не перевірена.
+Linux-збірка доступна в [Releases](https://github.com/SmailWolf/fable-localization-studio/releases/tag/v0.3.0). Для Windows додано окрему збірку MSVC та автоматичне пакування; стан перевірки дивіться у Windows release workflow.
 
 Локальна утиліта для створення й редагування перекладів **Fable II** та **Fable III**.
 Основна мова інтерфейсу й типовий переклад — українська. Білоруська та інші мови
@@ -52,6 +52,25 @@ cmake --build build -j
 ```
 
 Програма збирається в `bin/fable-localization-studio`.
+
+## Windows
+
+Готовий Windows ZIP з'являється в Releases після успішної збірки та перевірок.
+Розпакуйте весь архів і запустіть `start.bat`. Підтримка пакета: Windows 10/11
+x64, процесор AVX2/FMA/F16C. Модель завантажується окремо. Архів містить CPU-рушій;
+для CUDA потрібен окремий Windows `llama-server.exe` у `engine/cuda/`.
+
+Для власної збірки потрібні Visual Studio 2022 C++, CMake, Qt 6.4+ MSVC x64 і zlib.
+Наприклад, з Qt 6.8.3 та zlib, встановленою через vcpkg:
+
+```powershell
+cmake -S . -B build-win -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build-win --config Release
+```
+
+Для пакування потрібні `windeployqt`, SQLite-плагін, zlib DLL та Windows-збірка
+llama.cpp. Повна відтворювана послідовність — у `.github/workflows/windows-release.yml`.
+Linux-інсталяція й локальні проєкти при цих змінах не оновлюються автоматично.
 
 ## Підготовка локального перекладу
 
