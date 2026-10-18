@@ -28,7 +28,7 @@ jobs:
           $root='C:/portable/Fable-Localization-Studio-0.3.1-Windows-x86_64'
           $vswhere="${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
           $vs=& $vswhere -latest -property installationPath
-          $crt=Get-ChildItem "$vs/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT" -Directory | Sort-Object FullName -Descending | Select-Object -First 1
+          $crt=Get-Item "$vs/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT" | Sort-Object FullName -Descending | Select-Object -First 1
           if (!$crt) { throw 'Redistributable Microsoft runtime not found' }
           Get-ChildItem "$($crt.FullName)/*.dll" | Copy-Item -Destination "$root/bin" -Force
           Get-ChildItem "$($crt.FullName)/*.dll" | Copy-Item -Destination "$root/engine/cpu" -Force
