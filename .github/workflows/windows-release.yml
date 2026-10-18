@@ -122,16 +122,28 @@ jobs:
           "$hash  Fable-Localization-Studio-0.3.1-Windows-x86_64.zip" | Set-Content -Encoding ascii C:/release-assets/SHA256SUMS-Windows.txt
           Set-Location C:/release-assets
           @'
-          import json,urllib.request,os
+          import json,urllib.request,urllib.error,os
           from pathlib import Path
           repo=os.environ['GH_REPOSITORY'];token=os.environ['GH_TOKEN']
           def request(url,data=None,kind='application/json'):
               req=urllib.request.Request(url,data=data,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':kind,'X-GitHub-Api-Version':'2022-11-28'})
               with urllib.request.urlopen(req) as response:return json.load(response)
           notes='Windows 10/11 x64: розпакуйте весь ZIP і запустіть `start.bat`. Потрібні AVX2/FMA/F16C. Включено `.exe`, Qt, SQLite-плагін, Noto Sans та CPU llama-server. Модель TranslateGemma 4B GGUF і CUDA-рушій не включено.\n\nАдаптовано запуск Windows-рушія `.exe`, пошук DLL і кодування українського тексту. Перевірено збірку MSVC, базові тести, запуск інтерфейсу та CPU-рушія на Windows runner. Повний ігровий процес на Windows не перевірено.\n\nБез готових локалізацій, перекладів, патчів, файлів гри та бази прогресу. Код утиліти — MIT.\n\nLinux-збірка: https://github.com/SmailWolf/fable-localization-studio/releases/tag/v0.3.0'
-          release=request('https://api.github.com/repos/'+repo+'/releases',json.dumps({'tag_name':'v0.3.1','target_commitish':os.environ['GH_COMMIT'],'name':'Fable Localization Studio 0.3.1 — Windows x86_64','body':notes,'draft':False,'prerelease':False}).encode())
+          try:
+              release=request('https://api.github.com/repos/'+repo+'/releases/tags/v0.3.1')
+          except urllib.error.HTTPError as e:
+              if e.code != 404: raise
+              release=request('https://api.github.com/repos/'+repo+'/releases',json.dumps({'tag_name':'v0.3.1','target_commitish':os.environ['GH_COMMIT'],'name':'Fable Localization Studio 0.3.1 — Windows x86_64','body':notes,'draft':False,'prerelease':False}).encode())
           for p in sorted(Path('.').iterdir()):
               request('https://uploads.github.com/repos/'+repo+'/releases/'+str(release['id'])+'/assets?name='+p.name,p.read_bytes(),'application/octet-stream')
           print(release['html_url'])
           '@ | python -
           if ($LASTEXITCODE) { throw 'Release publication failed' }
+      - name: Preserve ready archive even if publication fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ready-0.3.1
+          path: C:/release-assets/*
+          if-no-files-found: ignore
+          retention-days: 7
