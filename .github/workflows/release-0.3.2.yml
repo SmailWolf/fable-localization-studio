@@ -1,0 +1,121 @@
+name: Release 0.3.2
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release-0.3.2.yml]
+permissions:
+  contents: write
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config qt6-base-dev libqt6sql6-sqlite zlib1g-dev
+      - name: Build updated utility
+        run: ./build.sh
+      - name: Package with previously verified Linux runtime
+        run: |
+          curl -fL --retry 3 https://github.com/SmailWolf/fable-localization-studio/releases/download/v0.3.0/Fable-Localization-Studio-0.3.0-Linux-x86_64.tar.gz -o /tmp/base.tar.gz
+          echo 'a7b5f9266d8fd991eb87c0be353c96b1a9a43f2137f9806da36d46be127184ba  /tmp/base.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/base.tar.gz -C /tmp
+          mv /tmp/Fable-Localization-Studio-0.3.0-Linux-x86_64 /tmp/Fable-Localization-Studio-0.3.2-Linux-x86_64
+          ROOT=/tmp/Fable-Localization-Studio-0.3.2-Linux-x86_64
+          cp bin/fable-localization-studio "$ROOT/bin/"
+          cp README.md THIRD_PARTY.md LICENSE "$ROOT/"
+          sed -i 's/0.3.0/0.3.2/g' "$ROOT/START_HERE_UK.txt"
+          test -s "$ROOT/fonts/NotoSans-Regular.ttf"
+          cd "$ROOT"
+          QT_QPA_PLATFORM=offscreen ./start.sh --self-test
+          QT_QPA_PLATFORM=offscreen ./start.sh --screenshot /tmp/linux-0.3.2.png
+          LD_LIBRARY_PATH="$PWD/lib:$PWD/engine/cpu" ./engine/cpu/llama-server --version
+          rm -rf state
+          mkdir -p /tmp/release-assets
+          tar -C /tmp -czf /tmp/release-assets/Fable-Localization-Studio-0.3.2-Linux-x86_64.tar.gz Fable-Localization-Studio-0.3.2-Linux-x86_64
+          cd /tmp/release-assets
+          sha256sum *.tar.gz > SHA256SUMS-Linux.txt
+      - name: Preserve Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-0.3.2
+          path: /tmp/release-assets/*
+      - name: Publish Linux package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          ASSET_DIR: /tmp/release-assets
+        run: python3 scripts/publish-0.3.2.py
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      QT_VERSION: 6.8.3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt and zlib
+        run: |
+          python -m pip install aqtinstall==3.3.0
+          python -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 -O C:/Qt --archives qtbase qttools
+          if ($LASTEXITCODE) { throw 'Qt installation failed' }
+          if (!$env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT='C:/vcpkg' }
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install zlib:x64-windows
+          if ($LASTEXITCODE) { throw 'zlib installation failed' }
+          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          "QT_ROOT=C:/Qt/$env:QT_VERSION/msvc2022_64" >> $env:GITHUB_ENV
+      - name: Build Windows utility
+        run: |
+          cmake -S . -B build-win -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE) { throw 'Utility configuration failed' }
+          cmake --build build-win --config Release --parallel 2
+          if ($LASTEXITCODE) { throw 'Utility build failed' }
+      - name: Package with previously verified Windows runtime
+        run: |
+          curl.exe -fL --retry 3 https://github.com/SmailWolf/fable-localization-studio/releases/download/v0.3.1/Fable-Localization-Studio-0.3.1-Windows-x86_64-portable.zip -o C:/base.zip
+          if ($LASTEXITCODE) { throw 'Base runtime download failed' }
+          if ((Get-FileHash C:/base.zip -Algorithm SHA256).Hash.ToLower() -ne '217120ed9c9b324206b96481a95b30f4ec5f81af74090115c23adfd317c21162') { throw 'Runtime checksum mismatch' }
+          Expand-Archive C:/base.zip C:/
+          Rename-Item C:/Fable-Localization-Studio-0.3.1-Windows-x86_64 Fable-Localization-Studio-0.3.2-Windows-x86_64
+          $root='C:/Fable-Localization-Studio-0.3.2-Windows-x86_64'
+          $app=Get-ChildItem bin -Recurse -Filter fable-localization-studio.exe | Select-Object -First 1
+          Copy-Item $app.FullName "$root/bin/fable-localization-studio.exe" -Force
+          Copy-Item README.md,THIRD_PARTY.md,LICENSE,start.bat $root -Force
+          Get-ChildItem "$env:VCPKG_ROOT/installed/x64-windows/bin/*.dll" | Copy-Item -Destination "$root/bin" -Force
+          & "$env:QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir "$root/bin" "$root/bin/fable-localization-studio.exe"
+          if ($LASTEXITCODE) { throw 'Qt deployment failed' }
+          (Get-Content "$root/START_HERE_UK.txt" -Raw).Replace('0.3.1','0.3.2') | Set-Content -Encoding utf8 "$root/START_HERE_UK.txt"
+          if (!(Test-Path "$root/fonts/NotoSans-Regular.ttf")) { throw 'Noto Sans missing' }
+          $env:QT_QPA_PLATFORM='offscreen'
+          $env:PATH="$root/bin;$env:PATH"
+          $test=Start-Process "$root/bin/fable-localization-studio.exe" -ArgumentList '--self-test' -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw 'Tests failed' }
+          $report=Get-Content "$root/state/tests/report.json" | ConvertFrom-Json
+          if ($report.passed -lt 9) { throw 'Missing test results' }
+          $ui=Start-Process "$root/bin/fable-localization-studio.exe" -ArgumentList '--screenshot','C:/windows-0.3.2.png' -Wait -PassThru
+          if ($ui.ExitCode -ne 0 -or !(Test-Path C:/windows-0.3.2.png)) { throw 'GUI smoke test failed' }
+          & "$root/engine/cpu/llama-server.exe" --version
+          if ($LASTEXITCODE) { throw 'Engine smoke test failed' }
+          Remove-Item "$root/state" -Recurse -Force
+          $forbidden=Get-ChildItem $root -Recurse -File | Where-Object { $_.Extension -in '.sqlite','.babel','.bft','.gguf' }
+          if ($forbidden) { throw 'Package contains local data or game assets' }
+          New-Item -ItemType Directory -Force C:/release-assets | Out-Null
+          Compress-Archive -Path $root -DestinationPath C:/release-assets/Fable-Localization-Studio-0.3.2-Windows-x86_64-portable.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash C:/release-assets/*.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  Fable-Localization-Studio-0.3.2-Windows-x86_64-portable.zip" | Set-Content -Encoding ascii C:/release-assets/SHA256SUMS-Windows.txt
+      - name: Preserve Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-0.3.2
+          path: C:/release-assets/*
+      - name: Publish Windows package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          ASSET_DIR: C:/release-assets
+        run: python scripts/publish-0.3.2.py
